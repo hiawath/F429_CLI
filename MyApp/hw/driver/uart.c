@@ -1,0 +1,126 @@
+#include "uart.h"
+#include "hw_def.h"
+
+
+static UART_HandleTypeDef* m_huart;
+
+// 큐 및 뮤텍스 핸들
+static osMessageQueueId_t uart_rx_q = NULL;
+static osMutexId_t uart_tx_mutex = NULL; // UART 송신 보호용 Mutex
+
+static uint8_t rx_data; // 인터럽트 수신용 1바이트 임시 변수
+
+bool uartInit(UART_HandleTypeDef *huart) {
+  m_huart = huart;
+  if (huart == NULL) return false;
+
+  // FreeRTOS 메세지 큐 생성 (크기 256, 단위 1바이트)
+  if (uart_rx_q == NULL) {
+      uart_rx_q = osMessageQueueNew(256, sizeof(uint8_t), NULL);
+  }
+  // FreeRTOS Mutex 생성
+  if (uart_tx_mutex == NULL) {
+      uart_tx_mutex = osMutexNew(NULL);
+  }
+
+  return uartOpen((uint8_t)0, (uint32_t)9600);
+}
+
+bool uartOpen(uint8_t ch, uint32_t baud) {
+  if (ch == 0) {
+    // 현재 보드레이트와 다를 경우에만 재초기화
+    if (m_huart->Init.BaudRate != baud) {
+      m_huart->Init.BaudRate = baud;
+
+      // UART 하드웨어 비활성화 후 새로운 설정으로 재초기화
+      if (HAL_UART_DeInit(m_huart) != HAL_OK) {
+        return false;
+      }
+      if (HAL_UART_Init(m_huart) != HAL_OK) {
+        return false;
+      }
+
+      HAL_UART_Transmit(m_huart, (uint8_t *)"UART Reopened\r\n", 16, 100);
+      // 수신 인터럽트 다시 활성화
+      HAL_UART_Receive_IT(m_huart, &rx_data, 1);
+    }
+  }
+
+  return true;
+}
+
+uint32_t uartWrite(uint8_t ch, uint8_t *p_data, uint32_t length) {
+  uint32_t ret = 0;
+  
+  if (ch == 0) // 논리 채널 0 (또는 _DEF_UART1) 을 UART2로 맵핑
+  {
+    // UART 사용 권한을 획득할 때까지 대기 (Thread Safety)
+    if (uart_tx_mutex != NULL) {
+        osMutexAcquire(uart_tx_mutex, osWaitForever);
+    }
+    
+    if (HAL_UART_Transmit(m_huart, p_data, length, 100) == HAL_OK) {
+        ret = length;
+    }
+    
+    // UART 사용이 끝나면 열쇠 반환
+    if (uart_tx_mutex != NULL) {
+        osMutexRelease(uart_tx_mutex);
+    }
+  }
+  return ret;
+}
+
+uint32_t uartPrintf(uint8_t ch, char *fmt, ...) {
+  char buf[256];
+  va_list args;
+  int len;
+
+  va_start(args, fmt);
+  len = vsnprintf(buf, 256, fmt, args);
+  va_end(args);
+
+  return uartWrite(ch, (uint8_t *)buf, len);
+}
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
+  if (huart->Instance == m_huart->Instance) {
+    if (uart_rx_q != NULL) {
+        // 인터럽트 컨텍스트 내이므로 timeout은 0으로 설정
+        osMessageQueuePut(uart_rx_q, &rx_data, 0, 0); 
+    }
+    HAL_UART_Receive_IT(m_huart, &rx_data, 1);
+  }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
+  if (huart->Instance == USART2) {
+    // 에러 이후에도 멈추지 않고 다시 수신 대기 상태로 복구
+    HAL_UART_Receive_IT(m_huart, &rx_data, 1);
+  }
+}
+
+uint32_t uartAvailable(uint8_t ch) {
+  // 큐에 들어있는 메시지 개수 반환
+  if (ch == 0 && uart_rx_q != NULL) {
+      return osMessageQueueGetCount(uart_rx_q);
+  }
+  return 0;
+}
+
+uint8_t uartRead(uint8_t ch) {
+  uint8_t ret = 0;
+  if (ch == 0 && uart_rx_q != NULL) {
+      // 대기 없이 데이터 꺼내기 (Polling 호환성 유지)
+      osMessageQueueGet(uart_rx_q, &ret, NULL, 0);
+  }
+  return ret;
+}
+
+bool uartReadBlock(uint8_t ch, uint8_t *p_data, uint32_t timeout) {
+  if (ch == 0 && uart_rx_q != NULL) {
+      if (osMessageQueueGet(uart_rx_q, p_data, NULL, timeout) == osOK) {
+          return true;
+      }
+  }
+  return false;
+}
