@@ -165,14 +165,11 @@ static void processAnsiEscape(uint8_t rx_data)
     }
 }
 
-void cliMain(void)
+void cliMain(uint32_t timeout)
 {
     uint8_t rx_data;
     
-    // Polling 제거: 데이터가 들어올 때까지 무한 대기 (Blocking)
-    // CPU 점유율이 0%로 떨어지고 컨텍스트 스위칭 효율이 극대화됩니다.
-    // 0xFFFFFFFF는 CMSIS-RTOS의 osWaitForever 매크로와 동일한 값입니다.
-    if (uartReadBlock(cli_ch, &rx_data, 0xFFFFFFFF) == true)
+    if (uartReadBlock(cli_ch, &rx_data, timeout) == true)
     {
         // 1. 방향키 (ANSI 이스케이프) 파싱 중일 때
        

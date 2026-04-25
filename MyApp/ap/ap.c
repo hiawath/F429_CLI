@@ -1,56 +1,45 @@
 #define LOG_TAG "AP"
 
 #include "ap.h"
+#define AP_LED_MAX_CH 3
 
+static bool is_can_monitor = false;
+static uint32_t temp_read_period = 0; // 주기(ms) 0이면 주기적 동작 멈춤
+static uint32_t led_toggle_period[AP_LED_MAX_CH] = {0, }; // 0이면 자동 점멸 중지 상태
 
-
-void cliGpio(uint8_t argc, char **argv)
+void apInit(void)
 {
-    if (argc >= 3)
-    {
-        // argv[1]: "read" 또는 "write"
-        // argv[2]: 핀 이름 (예: "a5", "b12")
-        char port_char = tolower(argv[2][0]); // 첫 글자를 소문자로 ('a' ~ 'h')
-        int pin_num = atoi(&argv[2][1]);      // 두 번째 글자부터는 숫자로 변환 (0~15)
+    LOG_INF("Application Init... Started");
+    cliInit(0); // CLI 엔진 기본 세팅 (UART 채널 0번 주입)
+    cliSetCtrlCHandler(apStopAutoTasks); // Ctrl+C 핸들러 등록 (DIP)
+    monitorSetSyncHandler(apSyncPeriods); // 모니터 동기화 핸들러 등록 (DIP)
+    logInit();
+    monitorInit(); // 모니터링 시스템 스레드 락 및 변수 초기화
 
-        uint8_t port_idx = port_char - 'a'; // 'a'는 0, 'b'는 1 ...
+    cliAdd("led", cliLed); // "터미널에서 led 치면 cliLed 함수 실행해 줘" 등록
+    cliAdd("info", cliInfo);
+    cliAdd("sys", cliSys);
+    cliAdd("gpio", cliGpio);     // GPIO 읽기/쓰기 커맨드 등록
+    cliAdd("md", cliMd);         // 메모리 덤프 커맨드 등록
+    cliAdd("button", cliButton); // 버튼 보고 제어 등록
+    cliAdd("temp", cliTemp);     // 온도 센서 명령 등록
+    cliAdd("can", cliCan);       // CAN 명령 등록
+}
 
-        if (strcmp(argv[1], "read") == 0)
-        {
-            int8_t state = gpioExtRead(port_idx, pin_num);
-            if (state < 0)
-            {
-                cliPrintf("Invalid Port or Pin (ex: a5, b12)\r\n");
-            }
-            else
-            {
-                cliPrintf("GPIO %c%d = %d\r\n", toupper(port_char), pin_num, state);
-            }
-        }
-        else if (strcmp(argv[1], "write") == 0 && argc == 4)
-        {
-            int val = atoi(argv[3]);
-            if (gpioExtWrite(port_idx, pin_num, val))
-            {
-                cliPrintf("GPIO %c%d Set to %d\r\n", toupper(port_char), pin_num, val ? 1 : 0);
-            }
-            else
-            {
-                cliPrintf("Invalid Port or Pin (ex: a5, b12)\r\n");
-            }
-        }
-        else
-        {
-            cliPrintf("Usage: gpio read [a~h][0~15]\r\n");
-            cliPrintf("       gpio write [a~h][0~15] [0/1]\r\n");
-        }
-    }
-    else
+void apMain(void)
+{
+
+    while (1)
     {
-        cliPrintf("Usage: gpio read [a~h][0~15]\r\n");
-        cliPrintf("       gpio write [a~h][0~15] [0/1]\r\n");
+        // cliMain 내부에서 큐를 이용해 무한 대기(Blocking)하므로 CPU 점유율이 0%가
+        // 됩니다. 따라서 기존에 있던 osDelay()는 삭제해도 안전합니다.
+        cliMain(0xFFFFFFFF);
     }
 }
+//Task
+
+
+
 
 // 유효한 메모리 영역인지 검사하는 보호 함수
 static bool isSafeAddress(uint32_t addr)
@@ -77,81 +66,168 @@ static bool isSafeAddress(uint32_t addr)
     return false;
 }
 
-// 메모리 덤프 (Memory Dump) 명령어
-void cliMd(uint8_t argc, char **argv)
+void apStopAutoTasks(void)
 {
-    if (argc >= 2)
+    monitorOff();
+    for (int i=0; i<AP_LED_MAX_CH; i++)
     {
-        uint32_t addr = strtoul(argv[1], NULL, 16);
-        uint32_t length = 16;
+        led_toggle_period[i] = 0;
+        ledOff(i);
+    }
+    temp_read_period = 0;
+    tempStopAuto();
+}
 
-        if (argc >= 3)
+void apSyncPeriods(uint32_t period)
+{
+    if (period > 0)
+    {
+        // 1. 온도 센서 주기 업데이트 및 자원 재기동(필요시)
+        tempStartAuto();
+        temp_read_period = period;
+
+        // 2. LED 토글 주기 업데이트 (모든 채널 동기화)
+        for (int i=0; i<AP_LED_MAX_CH; i++)
         {
-            length = strtoul(argv[2], NULL, 0);
+            led_toggle_period[i] = period;
         }
 
-        // 16바이트씩 단위로 루프
-        for (uint32_t i = 0; i < length; i += 16)
-        {
-            cliPrintf("0x%08X : ", addr + i);
-
-            for (uint32_t j = 0; j < 16; j++)
-            {
-                if (i + j < length)
-                {
-                    uint32_t target_addr = addr + i + j;
-
-                    // Bus Fault 방지용 메모리 맵 유효성 검사
-                    if (isSafeAddress(target_addr))
-                    {
-                        uint8_t val = *((volatile uint8_t *)target_addr);
-                        cliPrintf("%02X ", val);
-                    }
-                    else
-                    {
-                        // 읽기 금지 구역은 ?? 로 출력
-                        cliPrintf("?? ");
-                    }
-                }
-                else
-                {
-                    cliPrintf("   ");
-                }
-            }
-
-            cliPrintf(" | ");
-
-            for (uint32_t j = 0; j < 16; j++)
-            {
-                if (i + j < length)
-                {
-                    uint32_t target_addr = addr + i + j;
-                    if (isSafeAddress(target_addr))
-                    {
-                        uint8_t val = *((volatile uint8_t *)target_addr);
-                        if (val >= 32 && val <= 126)
-                            cliPrintf("%c", val);
-                        else
-                            cliPrintf(".");
-                    }
-                    else
-                    {
-                        cliPrintf(".");
-                    }
-                }
-            }
-            cliPrintf("\r\n");
-        }
+        LOG_INF("Tasks Synchronized to %d ms", period);
     }
     else
     {
-        cliPrintf("Usage: md [addr(hex)] [length]\r\n");
-        cliPrintf("       md 08000000 32\r\n");
+        temp_read_period = 0;
+        for (int i=0; i<AP_LED_MAX_CH; i++)
+        {
+            led_toggle_period[i] = 0;
+        }
+    }
+}
+
+
+
+
+void StartDefaultTask(void *argument)
+{
+    hwInit();
+    apInit();
+    while (1)
+    {
+        apMain();
+    }
+}
+
+// 📌 백그라운드 시스템 태스크 (LED 점멸 등)
+void ledStartTask(void *argument)
+{
+    uint32_t pre_time[AP_LED_MAX_CH];
+    for (int i=0; i<AP_LED_MAX_CH; i++) pre_time[i] = millis();
+
+    while (1)
+    {
+        for (int i=0; i<AP_LED_MAX_CH; i++)
+        {
+            if (led_toggle_period[i] > 0)
+            {
+                if (millis() - pre_time[i] >= led_toggle_period[i])
+                {
+                    pre_time[i] = millis();
+                    ledToggle(i);
+
+                    if (i == 0) // 모니터링은 0번 기준 유지
+                    {
+                        bool led_state = ledGetStatus(0);
+                        monitorUpdateValue(ID_OUT_LED_STATE, TYPE_BOOL, &led_state);
+                    }
+                }
+            }
+            else
+            {
+                pre_time[i] = millis();
+            }
+        }
+        osDelay(10); // 10ms 주기로 체크
+    }
+}
+
+// 📌 백그라운드 온도 센서 태스크
+void tempStartTask(void *argument)
+{
+    while (1)
+    {
+        if (temp_read_period > 0)
+        {
+            // 이미 켜진 DMA 버퍼에서 값만 쏙 빼와서 출력 (Zero Overhead)
+            float t = tempReadAuto();
+
+            // 시나리오 로그 적용
+            LOG_DBG("Temp Sensor DMA Buffer Read Success");
+
+            if (t > 40.0f)
+            {
+                LOG_WRN("High Temperature Alert: %.2f *C", t);
+            }
+
+            // 모니터 시스템에 현재 온도값을 갱신 (전략 1)
+            monitorUpdateValue(ID_ENV_TEMP, TYPE_FLOAT, &t);
+
+            // 사람을 위한 텍스트 모드일 때만 출력
+            if (!isMonitoringOn())
+            {
+                cliPrintf("Current Temp: %.2f *C\r\n", t);
+            }
+
+            osDelay(temp_read_period);
+        }
+        else
+        {
+            osDelay(50);
+        }
+    }
+}
+
+// 📌 20ms 고속 모니터링 전용 송신 태스크 (전략 2)
+void monitorStartTask(void *argument)
+{
+    while (1)
+    {
+        if (isMonitoringOn())
+        {
+            // 현재 스냅샷에 찍힌 모든 센서들의 값을 TLV 패킷으로 조립하여 UART로 고속
+            // 블라스트!
+            monitorSendPacket();
+        }
+        else{
+
+
+        }
+        osDelay(monitorGetPeriod()); 
+    }
+}
+
+
+
+// 📌 백그라운드 CAN 모니터링 태스크
+void canStartTask(void *argument)
+{
+    while (1)
+    {
+        if (is_can_monitor)
+        {
+            can_msg_t msg;
+            if (canReceive(0, &msg))
+            {
+                cliPrintf("CAN RX > ID: 0x%03X, DLC: %d, DATA: ", msg.id, msg.dlc);
+                for (int i=0; i<msg.dlc; i++) cliPrintf("%02X ", msg.data[i]);
+                cliPrintf("\r\n");
+            }
+        }
+        osDelay(10);
     }
 }
 
 #define AP_LED_MAX_CH 3
-static uint32_t led_toggle_period[AP_LED_MAX_CH] = {0, }; // 0이면 자동 점멸 중지 상태
+
 
 void cliLed(uint8_t argc, char **argv)
 {
@@ -289,7 +365,6 @@ void cliButton(uint8_t argc, char **argv)
     }
 }
 
-static uint32_t temp_read_period = 0; // 주기(ms) 0이면 주기적 동작 멈춤
 
 void cliTemp(uint8_t argc, char **argv)
 {
@@ -338,168 +413,182 @@ void cliTemp(uint8_t argc, char **argv)
     }
 }
 
-void apStopAutoTasks(void)
+
+
+
+void cliCan(uint8_t argc, char **argv)
 {
-    monitorOff();
-    for (int i=0; i<AP_LED_MAX_CH; i++)
+    bool ret = false;
+
+    if (argc == 2 && cliIsStr(argv[1], "info"))
     {
-        led_toggle_period[i] = 0;
-        ledOff(i);
+        cliPrintf("CAN Channel: 0\r\n");
+        cliPrintf("Opened     : %s\r\n", canIsOpened(0) ? "YES":"NO");
+        cliPrintf("Rx Count   : %d\r\n", canGetRxCount(0));
+        cliPrintf("Tx Count   : %d\r\n", canGetTxCount(0));
+        cliPrintf("Err Count  : %d\r\n", canGetErrorCount(0));
+        ret = true;
     }
-    temp_read_period = 0;
-    tempStopAuto();
-}
 
-void apSyncPeriods(uint32_t period)
-{
-    if (period > 0)
+    if (argc == 2 && cliIsStr(argv[1], "open"))
     {
-        // 1. 온도 센서 주기 업데이트 및 자원 재기동(필요시)
-        tempStartAuto();
-        temp_read_period = period;
+        if (canOpen(0)) cliPrintf("CAN Open Success\r\n");
+        else cliPrintf("CAN Open Fail\r\n");
+        ret = true;
+    }
 
-        // 2. LED 토글 주기 업데이트 (모든 채널 동기화)
-        for (int i=0; i<AP_LED_MAX_CH; i++)
+    if (argc == 2 && cliIsStr(argv[1], "monitor"))
+    {
+        is_can_monitor = !is_can_monitor;
+        cliPrintf("CAN Monitor: %s\r\n", is_can_monitor ? "ON":"OFF");
+        ret = true;
+    }
+
+    if (argc >= 3 && cliIsStr(argv[1], "send"))
+    {
+        can_msg_t msg;
+        msg.id = (uint32_t)strtoul(argv[2], NULL, 16);
+        msg.dlc = argc - 3;
+        if (msg.dlc > 8) msg.dlc = 8;
+        for (int i=0; i<msg.dlc; i++)
         {
-            led_toggle_period[i] = period;
+            msg.data[i] = (uint8_t)strtoul(argv[3+i], NULL, 16);
         }
+        msg.format = 0;
+        msg.type = 0;
 
-        LOG_INF("Tasks Synchronized to %d ms", period);
+        if (canSend(0, &msg)) cliPrintf("CAN Send Success\r\n");
+        else cliPrintf("CAN Send Fail\r\n");
+        ret = true;
     }
-    else
+
+    if (ret != true)
     {
-        temp_read_period = 0;
-        for (int i=0; i<AP_LED_MAX_CH; i++)
+        cliPrintf("can info\r\n");
+        cliPrintf("can open\r\n");
+        cliPrintf("can monitor\r\n");
+        cliPrintf("can send [id] [d1] [d2] ...\r\n");
+    }
+}
+
+
+void cliGpio(uint8_t argc, char **argv)
+{
+    if (argc >= 3)
+    {
+        // argv[1]: "read" 또는 "write"
+        // argv[2]: 핀 이름 (예: "a5", "b12")
+        char port_char = tolower(argv[2][0]); // 첫 글자를 소문자로 ('a' ~ 'h')
+        int pin_num = atoi(&argv[2][1]);      // 두 번째 글자부터는 숫자로 변환 (0~15)
+
+        uint8_t port_idx = port_char - 'a'; // 'a'는 0, 'b'는 1 ...
+
+        if (strcmp(argv[1], "read") == 0)
         {
-            led_toggle_period[i] = 0;
-        }
-    }
-}
-
-void apInit(void)
-{
-    LOG_INF("Application Init... Started");
-    cliInit(0); // CLI 엔진 기본 세팅 (UART 채널 0번 주입)
-    cliSetCtrlCHandler(apStopAutoTasks); // Ctrl+C 핸들러 등록 (DIP)
-    monitorSetSyncHandler(apSyncPeriods); // 모니터 동기화 핸들러 등록 (DIP)
-    logInit();
-    monitorInit(); // 모니터링 시스템 스레드 락 및 변수 초기화
-
-    cliAdd("led", cliLed); // "터미널에서 led 치면 cliLed 함수 실행해 줘" 등록
-    cliAdd("info", cliInfo);
-    cliAdd("sys", cliSys);
-    cliAdd("gpio", cliGpio);     // GPIO 읽기/쓰기 커맨드 등록
-    cliAdd("md", cliMd);         // 메모리 덤프 커맨드 등록
-    cliAdd("button", cliButton); // 버튼 보고 제어 등록
-    cliAdd("temp", cliTemp);     // 온도 센서 명령 등록
-}
-
-
-void StartDefaultTask(void *argument)
-{
-    hwInit();
-    apInit();
-    while (1)
-    {
-        apMain();
-    }
-}
-
-// 📌 백그라운드 시스템 태스크 (LED 점멸 등)
-void ledStartTask(void *argument)
-{
-    uint32_t pre_time[AP_LED_MAX_CH];
-    for (int i=0; i<AP_LED_MAX_CH; i++) pre_time[i] = millis();
-
-    while (1)
-    {
-        for (int i=0; i<AP_LED_MAX_CH; i++)
-        {
-            if (led_toggle_period[i] > 0)
+            int8_t state = gpioExtRead(port_idx, pin_num);
+            if (state < 0)
             {
-                if (millis() - pre_time[i] >= led_toggle_period[i])
-                {
-                    pre_time[i] = millis();
-                    ledToggle(i);
-
-                    if (i == 0) // 모니터링은 0번 기준 유지
-                    {
-                        bool led_state = ledGetStatus(0);
-                        monitorUpdateValue(ID_OUT_LED_STATE, TYPE_BOOL, &led_state);
-                    }
-                }
+                cliPrintf("Invalid Port or Pin (ex: a5, b12)\r\n");
             }
             else
             {
-                pre_time[i] = millis();
+                cliPrintf("GPIO %c%d = %d\r\n", toupper(port_char), pin_num, state);
             }
         }
-        osDelay(10); // 10ms 주기로 체크
-    }
-}
-
-// 📌 백그라운드 온도 센서 태스크
-void tempStartTask(void *argument)
-{
-    while (1)
-    {
-        if (temp_read_period > 0)
+        else if (strcmp(argv[1], "write") == 0 && argc == 4)
         {
-            // 이미 켜진 DMA 버퍼에서 값만 쏙 빼와서 출력 (Zero Overhead)
-            float t = tempReadAuto();
-
-            // 시나리오 로그 적용
-            LOG_DBG("Temp Sensor DMA Buffer Read Success");
-
-            if (t > 40.0f)
+            int val = atoi(argv[3]);
+            if (gpioExtWrite(port_idx, pin_num, val))
             {
-                LOG_WRN("High Temperature Alert: %.2f *C", t);
+                cliPrintf("GPIO %c%d Set to %d\r\n", toupper(port_char), pin_num, val ? 1 : 0);
             }
-
-            // 모니터 시스템에 현재 온도값을 갱신 (전략 1)
-            monitorUpdateValue(ID_ENV_TEMP, TYPE_FLOAT, &t);
-
-            // 사람을 위한 텍스트 모드일 때만 출력
-            if (!isMonitoringOn())
+            else
             {
-                cliPrintf("Current Temp: %.2f *C\r\n", t);
+                cliPrintf("Invalid Port or Pin (ex: a5, b12)\r\n");
             }
-
-            osDelay(temp_read_period);
         }
         else
         {
-            osDelay(50);
+            cliPrintf("Usage: gpio read [a~h][0~15]\r\n");
+            cliPrintf("       gpio write [a~h][0~15] [0/1]\r\n");
         }
+    }
+    else
+    {
+        cliPrintf("Usage: gpio read [a~h][0~15]\r\n");
+        cliPrintf("       gpio write [a~h][0~15] [0/1]\r\n");
     }
 }
 
-// 📌 20ms 고속 모니터링 전용 송신 태스크 (전략 2)
-void monitorStartTask(void *argument)
+// 메모리 덤프 (Memory Dump) 명령어
+void cliMd(uint8_t argc, char **argv)
 {
-    while (1)
+    if (argc >= 2)
     {
-        if (isMonitoringOn())
+        uint32_t addr = strtoul(argv[1], NULL, 16);
+        uint32_t length = 16;
+
+        if (argc >= 3)
         {
-            // 현재 스냅샷에 찍힌 모든 센서들의 값을 TLV 패킷으로 조립하여 UART로 고속
-            // 블라스트!
-            monitorSendPacket();
+            length = strtoul(argv[2], NULL, 0);
         }
-        else{
 
+        // 16바이트씩 단위로 루프
+        for (uint32_t i = 0; i < length; i += 16)
+        {
+            cliPrintf("0x%08X : ", addr + i);
 
+            for (uint32_t j = 0; j < 16; j++)
+            {
+                if (i + j < length)
+                {
+                    uint32_t target_addr = addr + i + j;
+
+                    // Bus Fault 방지용 메모리 맵 유효성 검사
+                    if (isSafeAddress(target_addr))
+                    {
+                        uint8_t val = *((volatile uint8_t *)target_addr);
+                        cliPrintf("%02X ", val);
+                    }
+                    else
+                    {
+                        // 읽기 금지 구역은 ?? 로 출력
+                        cliPrintf("?? ");
+                    }
+                }
+                else
+                {
+                    cliPrintf("   ");
+                }
+            }
+
+            cliPrintf(" | ");
+
+            for (uint32_t j = 0; j < 16; j++)
+            {
+                if (i + j < length)
+                {
+                    uint32_t target_addr = addr + i + j;
+                    if (isSafeAddress(target_addr))
+                    {
+                        uint8_t val = *((volatile uint8_t *)target_addr);
+                        if (val >= 32 && val <= 126)
+                            cliPrintf("%c", val);
+                        else
+                            cliPrintf(".");
+                    }
+                    else
+                    {
+                        cliPrintf(".");
+                    }
+                }
+            }
+            cliPrintf("\r\n");
         }
-        osDelay(monitorGetPeriod()); 
     }
-}
-
-void apMain(void)
-{
-
-    while (1)
+    else
     {
-        // cliMain 내부에서 큐를 이용해 무한 대기(Blocking)하므로 CPU 점유율이 0%가
-        // 됩니다. 따라서 기존에 있던 osDelay()는 삭제해도 안전합니다.
-        cliMain();
+        cliPrintf("Usage: md [addr(hex)] [length]\r\n");
+        cliPrintf("       md 08000000 32\r\n");
     }
 }

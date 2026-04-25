@@ -75,6 +75,13 @@ const osThreadAttr_t monitorTask_attributes = {
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
+/* Definitions for canTask */
+osThreadId_t canTaskHandle;
+const osThreadAttr_t canTask_attributes = {
+  .name = "canTask",
+  .stack_size = 128 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -85,6 +92,7 @@ void StartDefaultTask(void *argument);
 void ledStartTask(void *argument);
 void tempStartTask(void *argument);
 void monitorStartTask(void *argument);
+void canStartTask(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -126,6 +134,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of monitorTask */
   monitorTaskHandle = osThreadNew(monitorStartTask, NULL, &monitorTask_attributes);
+
+  /* creation of canTask */
+  canTaskHandle = osThreadNew(canStartTask, NULL, &canTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -207,6 +218,24 @@ __weak void monitorStartTask(void *argument)
     osDelay(1);
   }
   /* USER CODE END monitorStartTask */
+}
+
+/* USER CODE BEGIN Header_canStartTask */
+/**
+* @brief Function implementing the canTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_canStartTask */
+__weak void canStartTask(void *argument)
+{
+  /* USER CODE BEGIN canStartTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END canStartTask */
 }
 
 /* Private application code --------------------------------------------------*/

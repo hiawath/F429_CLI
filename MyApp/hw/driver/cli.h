@@ -7,7 +7,7 @@
 typedef void (*cli_callback_t)(void);
 
 void cliInit(uint8_t ch);
-void cliMain(void);
+void cliMain(uint32_t timeout);
 void cliPrintf(char *fmt, ...);
 void cliSetCtrlCHandler(cli_callback_t handler);
 

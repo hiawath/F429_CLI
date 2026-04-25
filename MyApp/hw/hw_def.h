@@ -7,6 +7,7 @@
 #include <main.h>  // CubeMX가 만든 포트 정의 사용
 #include <cmsis_os.h> // RTOS API
 #include <adc.h>
+#include <can.h>
 #include <stm32f4xx_hal_adc.h>
 
 

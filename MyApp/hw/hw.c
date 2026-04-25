@@ -11,13 +11,19 @@ static const led_info_t led_tbl[] =
 
 static const uart_info_t uart_tbl[] = 
 {
-  {&huart3, 9600},
+  {&huart3, 115200},
+};
+
+static const can_info_t can_tbl[] = 
+{
+  {&hcan1, 500000},
 };
 
 
 void hwInit(void){
     ledInit(led_tbl, sizeof(led_tbl)/sizeof(led_info_t));
     uartInit(uart_tbl, sizeof(uart_tbl)/sizeof(uart_info_t));
+    canInit(can_tbl, sizeof(can_tbl)/sizeof(can_info_t));
     buttonInit();
     tempInit(&hadc1);
 }

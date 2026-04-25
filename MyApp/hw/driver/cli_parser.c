@@ -88,3 +88,9 @@ static void cliClear(uint8_t argc, char **argv)
 {
     cliPrintf("\x1B[2J\x1B[H");
 }
+
+bool cliIsStr(const char *p_str, const char *p_target)
+{
+    if (p_str == NULL || p_target == NULL) return false;
+    return (strcmp(p_str, p_target) == 0);
+}

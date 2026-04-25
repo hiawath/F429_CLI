@@ -8,4 +8,6 @@ bool cliAdd(const char *cmd_str, void (*cmd_func)(uint8_t argc, char **argv));
 void cliParseArgs(char *line_buf);
 void cliRunCommand(void);
 
+bool cliIsStr(const char *p_str, const char *p_target);
+
 #endif /* SRC_HW_DRIVER_CLI_PARSER_H_ */

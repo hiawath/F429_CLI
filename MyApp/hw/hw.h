@@ -11,9 +11,11 @@
 #include "my_gpio.h"
 #include "button.h"
 #include "temp.h"
+#include "mycan.h"
 
 extern UART_HandleTypeDef huart3;
 extern ADC_HandleTypeDef hadc1;
+extern CAN_HandleTypeDef hcan1;
 
 void hwInit(void);
 
