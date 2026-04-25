@@ -150,34 +150,54 @@ void cliMd(uint8_t argc, char **argv)
     }
 }
 
-static uint32_t led_toggle_period = 0; // 0이면 자동 점멸 중지 상태
+#define AP_LED_MAX_CH 3
+static uint32_t led_toggle_period[AP_LED_MAX_CH] = {0, }; // 0이면 자동 점멸 중지 상태
 
 void cliLed(uint8_t argc, char **argv)
 {
-    if (argc >= 2)
+    if (argc >= 2 && strcmp(argv[1], "all") == 0 && strcmp(argv[2], "off") == 0)
     {
-        if (strcmp(argv[1], "on") == 0)
+        for (int i=0; i<AP_LED_MAX_CH; i++)
         {
-            led_toggle_period = 0; // 동작 중지
-            ledOn();
-            cliPrintf("LED ON\r\n");
+            led_toggle_period[i] = 0;
+            ledOff(i);
         }
-        else if (strcmp(argv[1], "off") == 0)
+        cliPrintf("All LEDs OFF\r\n");
+        return;
+    }
+
+    if (argc >= 3)
+    {
+        uint8_t ch = atoi(argv[1]);
+        if (ch >= AP_LED_MAX_CH)
         {
-            led_toggle_period = 0; // 동작 중지
-            ledOff();
-            cliPrintf("LED OFF\r\n");
+            cliPrintf("Invalid LED Channel (0~%d) or 'all'\r\n", AP_LED_MAX_CH - 1);
+            return;
         }
-        else if (strcmp(argv[1], "toggle") == 0)
+
+
+        if (strcmp(argv[2], "on") == 0)
         {
-            if (argc == 3)
+            led_toggle_period[ch] = 0; // 동작 중지
+            ledOn(ch);
+            cliPrintf("LED %d ON\r\n", ch);
+        }
+        else if (strcmp(argv[2], "off") == 0)
+        {
+            led_toggle_period[ch] = 0; // 동작 중지
+            ledOff(ch);
+            cliPrintf("LED %d OFF\r\n", ch);
+        }
+        else if (strcmp(argv[2], "toggle") == 0)
+        {
+            if (argc == 4)
             {
-                // 주기적인 자동 토글 모드 (예: led toggle 1000)
-                int period = atoi(argv[2]);
+                // 주기적인 자동 토글 모드 (예: led 0 toggle 1000)
+                int period = atoi(argv[3]);
                 if (period > 0)
                 {
-                    led_toggle_period = period;
-                    cliPrintf("LED Auto-Toggle Started (%d ms)\r\n", period);
+                    led_toggle_period[ch] = period;
+                    cliPrintf("LED %d Auto-Toggle Started (%d ms)\r\n", ch, period);
                 }
                 else
                 {
@@ -186,21 +206,26 @@ void cliLed(uint8_t argc, char **argv)
             }
             else
             {
-                // 단발성 토글 모드 (예: led toggle)
-                led_toggle_period = 0; // 기존의 자동 점멸 태스크를 멈춤
-                ledToggle();
-                cliPrintf("LED TOGGLED ONCE\r\n");
+                // 단발성 토글 모드 (예: led 0 toggle)
+                led_toggle_period[ch] = 0; 
+                ledToggle(ch);
+                cliPrintf("LED %d TOGGLED ONCE\r\n", ch);
             }
         }
-        // LED 상태 즉시 업데이트
-        bool led_state = ledGetStatus();
-        monitorUpdateValue(ID_OUT_LED_STATE, TYPE_BOOL, &led_state);
+        
+        // LED 상태 즉시 업데이트 (모니터링용은 0번 채널 위주로 유지하거나 확장 필요)
+        if (ch == 0)
+        {
+            bool led_state = ledGetStatus(0);
+            monitorUpdateValue(ID_OUT_LED_STATE, TYPE_BOOL, &led_state);
+        }
     }
     else
     {
-        cliPrintf("Usage: led [on|off]\r\n");
-        cliPrintf("       led toggle\r\n");
-        cliPrintf("       led toggle [period_ms]\r\n");
+        cliPrintf("Usage: led [ch] [on|off]\r\n");
+        cliPrintf("       led [ch] toggle\r\n");
+        cliPrintf("       led [ch] toggle [period_ms]\r\n");
+        cliPrintf("       led all off\r\n");
     }
 }
 void cliInfo(uint8_t argc, char **argv)
@@ -316,10 +341,13 @@ void cliTemp(uint8_t argc, char **argv)
 void apStopAutoTasks(void)
 {
     monitorOff();
-    led_toggle_period = 0;
+    for (int i=0; i<AP_LED_MAX_CH; i++)
+    {
+        led_toggle_period[i] = 0;
+        ledOff(i);
+    }
     temp_read_period = 0;
     tempStopAuto();
-    ledOff();
 }
 
 void apSyncPeriods(uint32_t period)
@@ -330,15 +358,21 @@ void apSyncPeriods(uint32_t period)
         tempStartAuto();
         temp_read_period = period;
 
-        // 2. LED 토글 주기 업데이트
-        led_toggle_period = period;
+        // 2. LED 토글 주기 업데이트 (모든 채널 동기화)
+        for (int i=0; i<AP_LED_MAX_CH; i++)
+        {
+            led_toggle_period[i] = period;
+        }
 
         LOG_INF("Tasks Synchronized to %d ms", period);
     }
     else
     {
         temp_read_period = 0;
-        led_toggle_period = 0;
+        for (int i=0; i<AP_LED_MAX_CH; i++)
+        {
+            led_toggle_period[i] = 0;
+        }
     }
 }
 
@@ -374,22 +408,33 @@ void StartDefaultTask(void *argument)
 // 📌 백그라운드 시스템 태스크 (LED 점멸 등)
 void ledStartTask(void *argument)
 {
+    uint32_t pre_time[AP_LED_MAX_CH];
+    for (int i=0; i<AP_LED_MAX_CH; i++) pre_time[i] = millis();
+
     while (1)
     {
-        if (led_toggle_period > 0)
+        for (int i=0; i<AP_LED_MAX_CH; i++)
         {
-            LOG_DBG("LED Toggle!");
-            ledToggle();
+            if (led_toggle_period[i] > 0)
+            {
+                if (millis() - pre_time[i] >= led_toggle_period[i])
+                {
+                    pre_time[i] = millis();
+                    ledToggle(i);
 
-            bool led_state = ledGetStatus();
-            monitorUpdateValue(ID_OUT_LED_STATE, TYPE_BOOL, &led_state);
-
-            osDelay(led_toggle_period);
+                    if (i == 0) // 모니터링은 0번 기준 유지
+                    {
+                        bool led_state = ledGetStatus(0);
+                        monitorUpdateValue(ID_OUT_LED_STATE, TYPE_BOOL, &led_state);
+                    }
+                }
+            }
+            else
+            {
+                pre_time[i] = millis();
+            }
         }
-        else
-        {
-         osDelay(100);
-        }
+        osDelay(10); // 10ms 주기로 체크
     }
 }
 
