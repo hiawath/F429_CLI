@@ -4,6 +4,7 @@
 #define AP_LED_MAX_CH 3
 
 static bool is_can_monitor = false;
+static bool is_can_clu_send = false;
 static uint32_t temp_read_period = 0; // 주기(ms) 0이면 주기적 동작 멈춤
 static uint32_t led_toggle_period[AP_LED_MAX_CH] = {0, }; // 0이면 자동 점멸 중지 상태
 
@@ -210,6 +211,8 @@ void monitorStartTask(void *argument)
 // 📌 백그라운드 CAN 모니터링 태스크
 void canStartTask(void *argument)
 {
+    uint32_t pre_time_clu = millis();
+
     while (1)
     {
         if (is_can_monitor)
@@ -222,6 +225,35 @@ void canStartTask(void *argument)
                 cliPrintf("\r\n");
             }
         }
+
+        if (is_can_clu_send)
+        {
+            if (millis() - pre_time_clu >= 100)
+            {
+                pre_time_clu = millis();
+
+                struct hyundai_2015_mcan_gw_clu_p_t clu_p;
+                clu_p.c_vehicle_speed = 100; // 100 km/h
+                clu_p.c_odometer = 123456;   // 123,456 km
+
+                uint8_t buf[8];
+                hyundai_2015_mcan_gw_clu_p_pack(buf, &clu_p, 8);
+
+                can_msg_t msg;
+                msg.id = HYUNDAI_2015_MCAN_GW_CLU_P_FRAME_ID;
+                msg.dlc = 8;
+                memcpy(msg.data, buf, 8);
+                msg.format = 0;
+                msg.type = 0;
+
+                canSend(0, &msg);
+            }
+        }
+        else
+        {
+            pre_time_clu = millis();
+        }
+
         osDelay(10);
     }
 }
@@ -462,12 +494,29 @@ void cliCan(uint8_t argc, char **argv)
         ret = true;
     }
 
+    if (argc == 2 && cliIsStr(argv[1], "sample"))
+    {
+        hyundai_2015_mcan_sample_cluster();
+        cliPrintf("MCAN Cluster Sample Executed (Check source for details)\r\n");
+        ret = true;
+    }
+
+    if (argc == 3 && cliIsStr(argv[1], "clu_send"))
+    {
+        if (cliIsStr(argv[2], "on")) is_can_clu_send = true;
+        else is_can_clu_send = false;
+        cliPrintf("CAN CLU Send: %s\r\n", is_can_clu_send ? "ON":"OFF");
+        ret = true;
+    }
+
     if (ret != true)
     {
         cliPrintf("can info\r\n");
         cliPrintf("can open\r\n");
         cliPrintf("can monitor\r\n");
         cliPrintf("can send [id] [d1] [d2] ...\r\n");
+        cliPrintf("can sample\r\n");
+        cliPrintf("can clu_send [on/off]\r\n");
     }
 }
 

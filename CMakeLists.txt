@@ -59,11 +59,13 @@ target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
     -u _printf_float
 )
 
+# Force re-scan for new files in MyApp
 file(GLOB_RECURSE SRC_FILES "MyApp/*.c")
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
      ${SRC_FILES}
+
 )
 
 # Add include paths
