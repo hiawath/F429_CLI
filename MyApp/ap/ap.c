@@ -379,7 +379,7 @@ void apSyncPeriods(uint32_t period)
 void apInit(void)
 {
     LOG_INF("Application Init... Started");
-    cliInit(); // CLI 엔진 기본 세팅
+    cliInit(0); // CLI 엔진 기본 세팅 (UART 채널 0번 주입)
     cliSetCtrlCHandler(apStopAutoTasks); // Ctrl+C 핸들러 등록 (DIP)
     monitorSetSyncHandler(apSyncPeriods); // 모니터 동기화 핸들러 등록 (DIP)
     logInit();

@@ -9,9 +9,15 @@ static const led_info_t led_tbl[] =
 };
 
 
+static const uart_info_t uart_tbl[] = 
+{
+  {&huart3, 9600},
+};
+
+
 void hwInit(void){
     ledInit(led_tbl, sizeof(led_tbl)/sizeof(led_info_t));
-    uartInit(&huart3);
+    uartInit(uart_tbl, sizeof(uart_tbl)/sizeof(uart_info_t));
     buttonInit();
     tempInit(&hadc1);
 }

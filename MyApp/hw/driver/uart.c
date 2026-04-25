@@ -1,77 +1,97 @@
 #include "uart.h"
-#include "hw_def.h"
 
 
-static UART_HandleTypeDef* m_huart;
+#define UART_MAX_CH     4
 
-// 큐 및 뮤텍스 핸들
-static osMessageQueueId_t uart_rx_q = NULL;
-static osMutexId_t uart_tx_mutex = NULL; // UART 송신 보호용 Mutex
 
-static uint8_t rx_data; // 인터럽트 수신용 1바이트 임시 변수
+typedef struct
+{
+  UART_HandleTypeDef *huart;
+  osMessageQueueId_t  rx_q;
+  osMutexId_t         tx_mutex;
+  uint8_t             rx_byte;
+  bool                is_open;
+} uart_obj_t;
 
-bool uartInit(UART_HandleTypeDef *huart) {
-  m_huart = huart;
-  if (huart == NULL) return false;
 
-  // FreeRTOS 메세지 큐 생성 (크기 256, 단위 1바이트)
-  if (uart_rx_q == NULL) {
-      uart_rx_q = osMessageQueueNew(256, sizeof(uint8_t), NULL);
+static const uart_info_t *p_uart_tbl = NULL;
+static uint8_t            uart_max_ch = 0;
+static uart_obj_t         uart_obj[UART_MAX_CH];
+
+
+bool uartInit(const uart_info_t *p_tbl, uint8_t ch_max)
+{
+  p_uart_tbl  = p_tbl;
+  uart_max_ch = ch_max;
+
+  for (int i=0; i<UART_MAX_CH; i++)
+  {
+    uart_obj[i].is_open = false;
+    uart_obj[i].rx_q = NULL;
+    uart_obj[i].tx_mutex = NULL;
   }
-  // FreeRTOS Mutex 생성
-  if (uart_tx_mutex == NULL) {
-      uart_tx_mutex = osMutexNew(NULL);
-  }
 
-  return uartOpen((uint8_t)0, (uint32_t)9600);
-}
+  for (int i=0; i<uart_max_ch; i++)
+  {
+    if (i >= UART_MAX_CH) break;
 
-bool uartOpen(uint8_t ch, uint32_t baud) {
-  if (ch == 0) {
-    // 현재 보드레이트와 다를 경우에만 재초기화
-    if (m_huart->Init.BaudRate != baud) {
-      m_huart->Init.BaudRate = baud;
-
-      // UART 하드웨어 비활성화 후 새로운 설정으로 재초기화
-      if (HAL_UART_DeInit(m_huart) != HAL_OK) {
-        return false;
-      }
-      if (HAL_UART_Init(m_huart) != HAL_OK) {
-        return false;
-      }
-
-      HAL_UART_Transmit(m_huart, (uint8_t *)"UART Reopened\r\n", 16, 100);
-      // 수신 인터럽트 다시 활성화
-      HAL_UART_Receive_IT(m_huart, &rx_data, 1);
+    uart_obj[i].huart = p_uart_tbl[i].huart;
+    
+    if (uart_obj[i].rx_q == NULL) {
+      uart_obj[i].rx_q = osMessageQueueNew(256, sizeof(uint8_t), NULL);
     }
+    if (uart_obj[i].tx_mutex == NULL) {
+      uart_obj[i].tx_mutex = osMutexNew(NULL);
+    }
+
+    uartOpen(i, p_uart_tbl[i].baud);
   }
 
   return true;
 }
 
-uint32_t uartWrite(uint8_t ch, uint8_t *p_data, uint32_t length) {
+bool uartOpen(uint8_t ch, uint32_t baud)
+{
+  if (ch >= uart_max_ch || ch >= UART_MAX_CH) return false;
+
+  UART_HandleTypeDef *huart = uart_obj[ch].huart;
+
+  if (huart->Init.BaudRate != baud)
+  {
+    huart->Init.BaudRate = baud;
+    if (HAL_UART_DeInit(huart) != HAL_OK) return false;
+    if (HAL_UART_Init(huart) != HAL_OK) return false;
+  }
+
+  uart_obj[ch].is_open = true;
+  HAL_UART_Receive_IT(huart, &uart_obj[ch].rx_byte, 1);
+
+  return true;
+}
+
+uint32_t uartWrite(uint8_t ch, uint8_t *p_data, uint32_t length)
+{
+  if (ch >= uart_max_ch || ch >= UART_MAX_CH || !uart_obj[ch].is_open) return 0;
+
   uint32_t ret = 0;
   
-  if (ch == 0) // 논리 채널 0 (또는 _DEF_UART1) 을 UART2로 맵핑
-  {
-    // UART 사용 권한을 획득할 때까지 대기 (Thread Safety)
-    if (uart_tx_mutex != NULL) {
-        osMutexAcquire(uart_tx_mutex, osWaitForever);
-    }
-    
-    if (HAL_UART_Transmit(m_huart, p_data, length, 100) == HAL_OK) {
-        ret = length;
-    }
-    
-    // UART 사용이 끝나면 열쇠 반환
-    if (uart_tx_mutex != NULL) {
-        osMutexRelease(uart_tx_mutex);
-    }
+  if (uart_obj[ch].tx_mutex != NULL) {
+    osMutexAcquire(uart_obj[ch].tx_mutex, osWaitForever);
   }
+  
+  if (HAL_UART_Transmit(uart_obj[ch].huart, p_data, length, 100) == HAL_OK) {
+    ret = length;
+  }
+  
+  if (uart_obj[ch].tx_mutex != NULL) {
+    osMutexRelease(uart_obj[ch].tx_mutex);
+  }
+
   return ret;
 }
 
-uint32_t uartPrintf(uint8_t ch, char *fmt, ...) {
+uint32_t uartPrintf(uint8_t ch, char *fmt, ...)
+{
   char buf[256];
   va_list args;
   int len;
@@ -82,45 +102,60 @@ uint32_t uartPrintf(uint8_t ch, char *fmt, ...) {
 
   return uartWrite(ch, (uint8_t *)buf, len);
 }
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-  if (huart->Instance == m_huart->Instance) {
-    if (uart_rx_q != NULL) {
-        // 인터럽트 컨텍스트 내이므로 timeout은 0으로 설정
-        osMessageQueuePut(uart_rx_q, &rx_data, 0, 0); 
-    }
-    HAL_UART_Receive_IT(m_huart, &rx_data, 1);
-  }
+
+uint32_t uartAvailable(uint8_t ch)
+{
+  if (ch >= uart_max_ch || ch >= UART_MAX_CH || uart_obj[ch].rx_q == NULL) return 0;
+
+  return osMessageQueueGetCount(uart_obj[ch].rx_q);
 }
 
-void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
-  if (huart->Instance == USART2) {
-    // 에러 이후에도 멈추지 않고 다시 수신 대기 상태로 복구
-    HAL_UART_Receive_IT(m_huart, &rx_data, 1);
-  }
-}
-
-uint32_t uartAvailable(uint8_t ch) {
-  // 큐에 들어있는 메시지 개수 반환
-  if (ch == 0 && uart_rx_q != NULL) {
-      return osMessageQueueGetCount(uart_rx_q);
-  }
-  return 0;
-}
-
-uint8_t uartRead(uint8_t ch) {
+uint8_t uartRead(uint8_t ch)
+{
   uint8_t ret = 0;
-  if (ch == 0 && uart_rx_q != NULL) {
-      // 대기 없이 데이터 꺼내기 (Polling 호환성 유지)
-      osMessageQueueGet(uart_rx_q, &ret, NULL, 0);
-  }
+  if (ch >= uart_max_ch || ch >= UART_MAX_CH || uart_obj[ch].rx_q == NULL) return 0;
+
+  osMessageQueueGet(uart_obj[ch].rx_q, &ret, NULL, 0);
   return ret;
 }
 
-bool uartReadBlock(uint8_t ch, uint8_t *p_data, uint32_t timeout) {
-  if (ch == 0 && uart_rx_q != NULL) {
-      if (osMessageQueueGet(uart_rx_q, p_data, NULL, timeout) == osOK) {
-          return true;
-      }
+bool uartReadBlock(uint8_t ch, uint8_t *p_data, uint32_t timeout)
+{
+  if (ch >= uart_max_ch || ch >= UART_MAX_CH || uart_obj[ch].rx_q == NULL) return false;
+
+  if (osMessageQueueGet(uart_obj[ch].rx_q, p_data, NULL, timeout) == osOK) {
+    return true;
   }
   return false;
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+  for (int i=0; i<uart_max_ch; i++)
+  {
+    if (i >= UART_MAX_CH) break;
+
+    if (huart->Instance == uart_obj[i].huart->Instance)
+    {
+      if (uart_obj[i].rx_q != NULL) {
+        osMessageQueuePut(uart_obj[i].rx_q, &uart_obj[i].rx_byte, 0, 0); 
+      }
+      HAL_UART_Receive_IT(uart_obj[i].huart, &uart_obj[i].rx_byte, 1);
+      break;
+    }
+  }
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+  for (int i=0; i<uart_max_ch; i++)
+  {
+    if (i >= UART_MAX_CH) break;
+
+    if (huart->Instance == uart_obj[i].huart->Instance)
+    {
+      HAL_UART_Receive_IT(uart_obj[i].huart, &uart_obj[i].rx_byte, 1);
+      break;
+    }
+  }
 }

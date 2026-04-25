@@ -3,7 +3,15 @@
 
 #include "hw_def.h"
 
-bool uartInit(UART_HandleTypeDef *huart);
+
+typedef struct
+{
+  UART_HandleTypeDef *huart;
+  uint32_t            baud;
+} uart_info_t;
+
+
+bool uartInit(const uart_info_t *p_tbl, uint8_t ch_max);
 bool uartOpen(uint8_t ch, uint32_t baud);
 uint32_t uartAvailable(uint8_t ch);
 uint8_t uartRead(uint8_t ch);

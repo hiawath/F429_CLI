@@ -24,6 +24,7 @@ typedef enum {
 
 static cli_input_state_t input_state = CLI_STATE_NORMAL;
 static cli_callback_t     ctrl_c_handler = NULL;
+static uint8_t            cli_ch = 0;
 
 void cliPrintf(char *fmt, ...)
 {
@@ -35,7 +36,7 @@ void cliPrintf(char *fmt, ...)
     len = vsnprintf(buf, 256, fmt, args);
     va_end(args);
 
-    uartWrite(0, (uint8_t *)buf, len); // 무조건 터미널이 연결된 채널(0)으로 쏨
+    uartWrite(cli_ch, (uint8_t *)buf, len); 
 }
 
 // === 리팩토링된 CLI 핸들러 함수들 ===
@@ -171,7 +172,7 @@ void cliMain(void)
     // Polling 제거: 데이터가 들어올 때까지 무한 대기 (Blocking)
     // CPU 점유율이 0%로 떨어지고 컨텍스트 스위칭 효율이 극대화됩니다.
     // 0xFFFFFFFF는 CMSIS-RTOS의 osWaitForever 매크로와 동일한 값입니다.
-    if (uartReadBlock(0, &rx_data, 0xFFFFFFFF) == true)
+    if (uartReadBlock(cli_ch, &rx_data, 0xFFFFFFFF) == true)
     {
         // 1. 방향키 (ANSI 이스케이프) 파싱 중일 때
        
@@ -218,8 +219,9 @@ void cliMain(void)
 
 
 // CLI 전체 초기화 함수
-void cliInit(void)
+void cliInit(uint8_t ch)
 {
+    cli_ch = ch;
     // 버퍼 초기화
     cli_line_idx = 0;
     cli_cursor = 0;
