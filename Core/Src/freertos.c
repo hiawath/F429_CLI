@@ -72,14 +72,14 @@ const osThreadAttr_t tempTask_attributes = {
 osThreadId_t monitorTaskHandle;
 const osThreadAttr_t monitorTask_attributes = {
   .name = "monitorTask",
-  .stack_size = 128 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for canTask */
 osThreadId_t canTaskHandle;
 const osThreadAttr_t canTask_attributes = {
   .name = "canTask",
-  .stack_size = 256 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 
