@@ -23,3 +23,6 @@ void cliSys(uint8_t argc, char **argv);
 void cliButton(uint8_t argc, char **argv);
 void cliMd(uint8_t argc, char **argv);
 void cliGpio(uint8_t argc, char **argv);
+
+
+void Stepper_Step(int step);

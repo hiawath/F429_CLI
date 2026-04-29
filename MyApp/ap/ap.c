@@ -1,3 +1,4 @@
+#include "cmsis_os2.h"
 #define LOG_TAG "AP"
 
 #include "ap.h"
@@ -255,6 +256,48 @@ void canStartTask(void *argument)
         }
 
         osDelay(10);
+    }
+}
+
+
+void servoStartTask(void *argument){
+
+    while (1) {
+        for(int i = 0; i < 200; i++) {
+            Stepper_Step(i);
+            osDelay(5); // 스텝 사이 대기 시간 (속도 조절)
+        }
+        osDelay(1000); // 1초 대기 후 재시작
+    }
+}
+
+void Stepper_Step(int step) {
+    // 4단계 시퀀스 (Full Step 방식)
+    switch(step % 4) {
+        case 0: // IN1:H, IN2:L, IN3:H, IN4:L
+            HAL_GPIO_WritePin(GPIOG, GPIO_PIN_1, GPIO_PIN_SET);   // PG1 (IN1)
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET); // PF9 (IN2)
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_SET);   // PF7 (IN3)
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET); // PF8 (IN4)
+            break;
+        case 1: // IN1:L, IN2:H, IN3:H, IN4:L
+            HAL_GPIO_WritePin(GPIOG, GPIO_PIN_1, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
+            break;
+        case 2: // IN1:L, IN2:H, IN3:L, IN4:H
+            HAL_GPIO_WritePin(GPIOG, GPIO_PIN_1, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
+            break;
+        case 3: // IN1:H, IN2:L, IN3:L, IN4:H
+            HAL_GPIO_WritePin(GPIOG, GPIO_PIN_1, GPIO_PIN_SET);
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
+            break;
     }
 }
 

@@ -82,6 +82,13 @@ const osThreadAttr_t canTask_attributes = {
   .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
+/* Definitions for servoTask */
+osThreadId_t servoTaskHandle;
+const osThreadAttr_t servoTask_attributes = {
+  .name = "servoTask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -93,6 +100,7 @@ void ledStartTask(void *argument);
 void tempStartTask(void *argument);
 void monitorStartTask(void *argument);
 void canStartTask(void *argument);
+void servoStartTask(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -137,6 +145,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of canTask */
   canTaskHandle = osThreadNew(canStartTask, NULL, &canTask_attributes);
+
+  /* creation of servoTask */
+  servoTaskHandle = osThreadNew(servoStartTask, NULL, &servoTask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -236,6 +247,24 @@ __weak void canStartTask(void *argument)
     osDelay(1);
   }
   /* USER CODE END canStartTask */
+}
+
+/* USER CODE BEGIN Header_servoStartTask */
+/**
+* @brief Function implementing the servoTask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_servoStartTask */
+__weak void servoStartTask(void *argument)
+{
+  /* USER CODE BEGIN servoStartTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END servoStartTask */
 }
 
 /* Private application code --------------------------------------------------*/
