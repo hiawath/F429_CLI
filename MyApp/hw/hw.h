@@ -13,6 +13,7 @@
 #include "temp.h"
 #include "mycan.h"
 #include "hyundai_2015_mcan.h"
+#include "servo.h"
 
 extern UART_HandleTypeDef huart3;
 extern ADC_HandleTypeDef hadc1;

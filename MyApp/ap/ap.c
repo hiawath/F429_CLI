@@ -260,46 +260,45 @@ void canStartTask(void *argument)
 }
 
 
+static servo_t my_servo;
+
 void servoStartTask(void *argument){
 
+    servo_cfg_t cfg = {
+        .in1_port = GPIOG, .in1_pin = GPIO_PIN_1,
+        .in2_port = GPIOF, .in2_pin = GPIO_PIN_9,
+        .in3_port = GPIOF, .in3_pin = GPIO_PIN_7,
+        .in4_port = GPIOF, .in4_pin = GPIO_PIN_8,
+        .en_port  = GPIOG, .en_pin  = GPIO_PIN_0 // [TODO] 실제 Enable 핀으로 변경하세요!
+    };
+    servoInit(&my_servo, &cfg);
+
+    // 속도 설정 (스텝 간격 5ms)
+    servoSetSpeed(&my_servo, 5);
+
+    // 정방향 실행 시작
+    servoRun(&my_servo, SERVO_DIR_FWD);
+
+    uint32_t last_toggle = osKernelGetTickCount();
+
     while (1) {
-        for(int i = 0; i < 200; i++) {
-            Stepper_Step(i);
-            osDelay(5); // 스텝 사이 대기 시간 (속도 조절)
+        // 백그라운드 업데이트 (이 함수가 지연 없이 계속 호출되어야 함)
+        servoUpdate(&my_servo);
+
+        // 예시: 2초마다 방향 전환
+        if (osKernelGetTickCount() - last_toggle >= 2000) {
+            last_toggle = osKernelGetTickCount();
+            if (my_servo.direction == SERVO_DIR_FWD) {
+                servoRun(&my_servo, SERVO_DIR_BWD);
+            } else {
+                servoRun(&my_servo, SERVO_DIR_FWD);
+            }
         }
-        osDelay(1000); // 1초 대기 후 재시작
+
+        osDelay(1); // FreeRTOS 태스크 양보 (1ms마다 체크)
     }
 }
 
-void Stepper_Step(int step) {
-    // 4단계 시퀀스 (Full Step 방식)
-    switch(step % 4) {
-        case 0: // IN1:H, IN2:L, IN3:H, IN4:L
-            HAL_GPIO_WritePin(GPIOG, GPIO_PIN_1, GPIO_PIN_SET);   // PG1 (IN1)
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET); // PF9 (IN2)
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_SET);   // PF7 (IN3)
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET); // PF8 (IN4)
-            break;
-        case 1: // IN1:L, IN2:H, IN3:H, IN4:L
-            HAL_GPIO_WritePin(GPIOG, GPIO_PIN_1, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_RESET);
-            break;
-        case 2: // IN1:L, IN2:H, IN3:L, IN4:H
-            HAL_GPIO_WritePin(GPIOG, GPIO_PIN_1, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-            break;
-        case 3: // IN1:H, IN2:L, IN3:L, IN4:H
-            HAL_GPIO_WritePin(GPIOG, GPIO_PIN_1, GPIO_PIN_SET);
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_7, GPIO_PIN_RESET);
-            HAL_GPIO_WritePin(GPIOF, GPIO_PIN_8, GPIO_PIN_SET);
-            break;
-    }
-}
 
 #define AP_LED_MAX_CH 3
 
