@@ -26,6 +26,7 @@ void apInit(void)
     cliAdd("button", cliButton); // 버튼 보고 제어 등록
     cliAdd("temp", cliTemp);     // 온도 센서 명령 등록
     cliAdd("can", cliCan);       // CAN 명령 등록
+    cliAdd("servo", cliServo);   // Servo 모터 명령 등록
 }
 
 void apMain(void)
@@ -273,28 +274,12 @@ void servoStartTask(void *argument){
     };
     servoInit(&my_servo, &cfg);
 
-    // 속도 설정 (스텝 간격 5ms)
+    // 속도 설정 (스텝 간격 5ms, 초기화 상태)
     servoSetSpeed(&my_servo, 5);
-
-    // 정방향 실행 시작
-    servoRun(&my_servo, SERVO_DIR_FWD);
-
-    uint32_t last_toggle = osKernelGetTickCount();
 
     while (1) {
         // 백그라운드 업데이트 (이 함수가 지연 없이 계속 호출되어야 함)
         servoUpdate(&my_servo);
-
-        // 예시: 2초마다 방향 전환
-        if (osKernelGetTickCount() - last_toggle >= 2000) {
-            last_toggle = osKernelGetTickCount();
-            if (my_servo.direction == SERVO_DIR_FWD) {
-                servoRun(&my_servo, SERVO_DIR_BWD);
-            } else {
-                servoRun(&my_servo, SERVO_DIR_FWD);
-            }
-        }
-
         osDelay(1); // FreeRTOS 태스크 양보 (1ms마다 체크)
     }
 }
@@ -559,6 +544,46 @@ void cliCan(uint8_t argc, char **argv)
         cliPrintf("can send [id] [d1] [d2] ...\r\n");
         cliPrintf("can sample\r\n");
         cliPrintf("can clu_send [on/off]\r\n");
+    }
+}
+
+void cliServo(uint8_t argc, char **argv)
+{
+    bool ret = false;
+
+    if (argc == 2 && cliIsStr(argv[1], "fwd"))
+    {
+        servoRun(&my_servo, SERVO_DIR_FWD);
+        cliPrintf("Servo running FORWARD\r\n");
+        ret = true;
+    }
+    if (argc == 2 && cliIsStr(argv[1], "bwd"))
+    {
+        servoRun(&my_servo, SERVO_DIR_BWD);
+        cliPrintf("Servo running BACKWARD\r\n");
+        ret = true;
+    }
+    if (argc == 2 && cliIsStr(argv[1], "stop"))
+    {
+        servoStop(&my_servo);
+        servoDisable(&my_servo); // 대기 시 코일 발열 방지
+        cliPrintf("Servo STOPPED\r\n");
+        ret = true;
+    }
+    if (argc == 3 && cliIsStr(argv[1], "speed"))
+    {
+        uint32_t speed = atoi(argv[2]);
+        servoSetSpeed(&my_servo, speed);
+        cliPrintf("Servo speed (delay) set to %d ms\r\n", speed);
+        ret = true;
+    }
+
+    if (ret == false)
+    {
+        cliPrintf("servo fwd\r\n");
+        cliPrintf("servo bwd\r\n");
+        cliPrintf("servo stop\r\n");
+        cliPrintf("servo speed [delay_ms]\r\n");
     }
 }
 
