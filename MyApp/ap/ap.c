@@ -9,21 +9,15 @@ static bool is_can_monitor = false;
 static bool is_can_clu_send = false;
 static uint32_t temp_read_period = 0; // 주기(ms) 0이면 주기적 동작 멈춤
 static uint32_t led_toggle_period[AP_LED_MAX_CH] = {0, }; // 0이면 자동 점멸 중지 상태
-static osMutexId_t uartMutexId = NULL;
-
+// 표준 printf 출력을 uartWrite로 넘겨서 Mutex와 IT(Interrupt) 송신을 모두 활용합니다.
 int _write(int file, char *ptr, int len)
 {
-    osMutexAcquire(uartMutexId, osWaitForever); // 출력 시작 전 잠금
-    HAL_UART_Transmit(&huart3, (uint8_t *)ptr, len, HAL_MAX_DELAY);
-    osMutexRelease(uartMutexId);               // 출력 완료 후 해제
-    return len;
+    return uartWrite(0, (uint8_t *)ptr, len);
 }
 
 void apInit(void)
 {
-    if (uartMutexId == NULL) {
-        uartMutexId = osMutexNew(NULL);
-    }
+
     LOG_INF("Application Init... Started");
     cliInit(0); // CLI 엔진 기본 세팅 (UART 채널 0번 주입)
     cliSetCtrlCHandler(apStopAutoTasks); // Ctrl+C 핸들러 등록 (DIP)
@@ -202,7 +196,7 @@ void tempStartTask(void *argument)
             if (!isMonitoringOn())
             {
                 // 3. %f 대신 %d와 %02d를 조합하여 출력!
-                cliPrintf("Current Temp: %c%d.%02d *C\\r\\n", sign, t_int, t_frac);
+                cliPrintf("Current Temp: %c%d.%02d *C\r\n", sign, t_int, t_frac);
             }
 
             osDelay(temp_read_period);
@@ -496,7 +490,21 @@ void cliTemp(uint8_t argc, char **argv)
         temp_read_period = 0;
 
         float t = tempReadSingle(); // 1회만 Polling으로 전력 아껴서 읽음
-        cliPrintf("Current Temp: %.2f *C\r\n", t);
+        
+        float val = t;
+        char sign = '\0';
+        if (val < 0.0f) {
+            sign = '-';
+            val = -val;
+        }
+        int t_int = (int)val;
+        int t_frac = (int)((val - t_int) * 100.0f);
+        
+        if (sign == '-') {
+            cliPrintf("Current Temp: -%d.%02d *C\r\n", t_int, t_frac);
+        } else {
+            cliPrintf("Current Temp: %d.%02d *C\r\n", t_int, t_frac);
+        }
     }
     else if (argc == 2)
     {
