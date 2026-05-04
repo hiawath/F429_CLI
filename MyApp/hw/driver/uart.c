@@ -9,6 +9,7 @@ typedef struct
   UART_HandleTypeDef *huart;
   osMessageQueueId_t  rx_q;
   osMutexId_t         tx_mutex;
+  osSemaphoreId_t     tx_sem; // 송신 완료 대기용 세마포어
   uint8_t             rx_byte;
   bool                is_open;
 } uart_obj_t;
@@ -29,6 +30,7 @@ bool uartInit(const uart_info_t *p_tbl, uint8_t ch_max)
     uart_obj[i].is_open = false;
     uart_obj[i].rx_q = NULL;
     uart_obj[i].tx_mutex = NULL;
+    uart_obj[i].tx_sem = NULL;
   }
 
   for (int i=0; i<uart_max_ch; i++)
@@ -42,6 +44,9 @@ bool uartInit(const uart_info_t *p_tbl, uint8_t ch_max)
     }
     if (uart_obj[i].tx_mutex == NULL) {
       uart_obj[i].tx_mutex = osMutexNew(NULL);
+    }
+    if (uart_obj[i].tx_sem == NULL) {
+      uart_obj[i].tx_sem = osSemaphoreNew(1, 0, NULL); // 최대 1, 초기값 0
     }
 
     uartOpen(i, p_uart_tbl[i].baud);
@@ -79,7 +84,12 @@ uint32_t uartWrite(uint8_t ch, uint8_t *p_data, uint32_t length)
     osMutexAcquire(uart_obj[ch].tx_mutex, osWaitForever);
   }
   
-  if (HAL_UART_Transmit(uart_obj[ch].huart, p_data, length, 100) == HAL_OK) {
+  // Interrupt 방식 송신 요청
+  if (HAL_UART_Transmit_IT(uart_obj[ch].huart, p_data, length) == HAL_OK) {
+    // 송신 완료 인터럽트(Callback)가 세마포어를 풀어줄 때까지 대기 (CPU 점유율 0%)
+    if (uart_obj[ch].tx_sem != NULL) {
+      osSemaphoreAcquire(uart_obj[ch].tx_sem, osWaitForever);
+    }
     ret = length;
   }
   
@@ -127,6 +137,22 @@ bool uartReadBlock(uint8_t ch, uint8_t *p_data, uint32_t timeout)
     return true;
   }
   return false;
+}
+
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  for (int i=0; i<uart_max_ch; i++)
+  {
+    if (i >= UART_MAX_CH) break;
+
+    if (huart->Instance == uart_obj[i].huart->Instance)
+    {
+      if (uart_obj[i].tx_sem != NULL) {
+        osSemaphoreRelease(uart_obj[i].tx_sem);
+      }
+      break;
+    }
+  }
 }
 
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
