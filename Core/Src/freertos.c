@@ -65,7 +65,7 @@ const osThreadAttr_t ledTask_attributes = {
 osThreadId_t tempTaskHandle;
 const osThreadAttr_t tempTask_attributes = {
   .name = "tempTask",
-  .stack_size = 256 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
 /* Definitions for monitorTask */
@@ -89,6 +89,13 @@ const osThreadAttr_t servoTask_attributes = {
   .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityLow,
 };
+/* Definitions for stackMonitorask */
+osThreadId_t stackMonitoraskHandle;
+const osThreadAttr_t stackMonitorask_attributes = {
+  .name = "stackMonitorask",
+  .stack_size = 256 * 4,
+  .priority = (osPriority_t) osPriorityLow,
+};
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
@@ -101,8 +108,21 @@ void tempStartTask(void *argument);
 void monitorStartTask(void *argument);
 void canStartTask(void *argument);
 void servoStartTask(void *argument);
+void stackMonitorStartTask(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
+
+/* Hook prototypes */
+void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName);
+
+/* USER CODE BEGIN 4 */
+__weak void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
+{
+   /* Run time stack overflow checking is performed if
+   configCHECK_FOR_STACK_OVERFLOW is defined to 1 or 2. This hook function is
+   called if a stack overflow is detected. */
+}
+/* USER CODE END 4 */
 
 /**
   * @brief  FreeRTOS initialization
@@ -148,6 +168,9 @@ void MX_FREERTOS_Init(void) {
 
   /* creation of servoTask */
   servoTaskHandle = osThreadNew(servoStartTask, NULL, &servoTask_attributes);
+
+  /* creation of stackMonitorask */
+  stackMonitoraskHandle = osThreadNew(stackMonitorStartTask, NULL, &stackMonitorask_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -265,6 +288,24 @@ __weak void servoStartTask(void *argument)
     osDelay(1);
   }
   /* USER CODE END servoStartTask */
+}
+
+/* USER CODE BEGIN Header_stackMonitorStartTask */
+/**
+* @brief Function implementing the stackMonitorask thread.
+* @param argument: Not used
+* @retval None
+*/
+/* USER CODE END Header_stackMonitorStartTask */
+__weak void stackMonitorStartTask(void *argument)
+{
+  /* USER CODE BEGIN stackMonitorStartTask */
+  /* Infinite loop */
+  for(;;)
+  {
+    osDelay(1);
+  }
+  /* USER CODE END stackMonitorStartTask */
 }
 
 /* Private application code --------------------------------------------------*/

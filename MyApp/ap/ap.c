@@ -4,13 +4,26 @@
 #include "ap.h"
 #define AP_LED_MAX_CH 3
 
+static servo_t my_servo;
 static bool is_can_monitor = false;
 static bool is_can_clu_send = false;
 static uint32_t temp_read_period = 0; // 주기(ms) 0이면 주기적 동작 멈춤
 static uint32_t led_toggle_period[AP_LED_MAX_CH] = {0, }; // 0이면 자동 점멸 중지 상태
+static osMutexId_t uartMutexId = NULL;
+
+int _write(int file, char *ptr, int len)
+{
+    osMutexAcquire(uartMutexId, osWaitForever); // 출력 시작 전 잠금
+    HAL_UART_Transmit(&huart3, (uint8_t *)ptr, len, HAL_MAX_DELAY);
+    osMutexRelease(uartMutexId);               // 출력 완료 후 해제
+    return len;
+}
 
 void apInit(void)
 {
+    if (uartMutexId == NULL) {
+        uartMutexId = osMutexNew(NULL);
+    }
     LOG_INF("Application Init... Started");
     cliInit(0); // CLI 엔진 기본 세팅 (UART 채널 0번 주입)
     cliSetCtrlCHandler(apStopAutoTasks); // Ctrl+C 핸들러 등록 (DIP)
@@ -261,7 +274,6 @@ void canStartTask(void *argument)
 }
 
 
-static servo_t my_servo;
 
 void servoStartTask(void *argument){
 
@@ -284,8 +296,43 @@ void servoStartTask(void *argument){
     }
 }
 
+extern osThreadId_t defaultTaskHandle;
+extern osThreadId_t ledTaskHandle;
+extern osThreadId_t tempTaskHandle;
+extern osThreadId_t monitorTaskHandle;
+extern osThreadId_t canTaskHandle;
+extern osThreadId_t servoTaskHandle;
+extern osThreadId_t stackMonitoraskHandle;
 
-#define AP_LED_MAX_CH 3
+static  uint32_t task1Stack, task2Stack, task3Stack, task4Stack, task5Stack, task6Stack, task7Stack;
+void showStack(){
+    task1Stack = osThreadGetStackSpace(defaultTaskHandle);
+    task2Stack = osThreadGetStackSpace(ledTaskHandle);
+    task3Stack = osThreadGetStackSpace(tempTaskHandle);
+    task4Stack = osThreadGetStackSpace(monitorTaskHandle);
+    task5Stack = osThreadGetStackSpace(canTaskHandle);
+    task6Stack = osThreadGetStackSpace(servoTaskHandle);
+    task7Stack = osThreadGetStackSpace(stackMonitoraskHandle);
+
+    printf("Stack Free - Task1: %lu Bytes\t Task2: %lu Bytes\t Task3: %lu Bytes\r\n", 
+           task1Stack, task2Stack, task3Stack);
+    printf("Stack Free - Task3: %lu Bytes\t Task5: %lu Bytes\t Task6: %lu Bytes\t Task7: %lu Bytes\r\n", 
+           task4Stack, task5Stack, task6Stack, task7Stack);
+}
+
+void stackMonitorStartTask(void *argument)
+{
+  
+  for(;;)
+  {
+    osDelay(5000);  // Wait 5 seconds between measurements
+    showStack();
+    
+  }
+}
+
+
+
 
 
 void cliLed(uint8_t argc, char **argv)
@@ -583,7 +630,7 @@ void cliServo(uint8_t argc, char **argv)
         cliPrintf("servo fwd\r\n");
         cliPrintf("servo bwd\r\n");
         cliPrintf("servo stop\r\n");
-        cliPrintf("servo speed [delay_ms]\r\n");
+        cliPrintf("servo speed [delay_ms from 3ms]\r\n");
     }
 }
 
@@ -707,4 +754,21 @@ void cliMd(uint8_t argc, char **argv)
         cliPrintf("Usage: md [addr(hex)] [length]\r\n");
         cliPrintf("       md 08000000 32\r\n");
     }
+}
+
+//extern UART_HandleTypeDef huart3;
+
+void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
+{
+    // Re-initialize UART to ensure it works
+    HAL_UART_DeInit(&huart3);
+    HAL_UART_Init(&huart3);
+    
+	  char msg[100];
+	  int len = sprintf (msg, "Stack Overflow Detected in: %s\n", pcTaskName);
+	  HAL_UART_Transmit(&huart3, (uint8_t *)msg, len, 1000);
+      showStack();
+    
+    // Stop execution
+    while(1);
 }
