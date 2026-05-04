@@ -175,13 +175,24 @@ void tempStartTask(void *argument)
         {
             // 이미 켜진 DMA 버퍼에서 값만 쏙 빼와서 출력 (Zero Overhead)
             float t = tempReadAuto();
+            float val=t;
+            // 1. 음수 부호 처리 및 절댓값 변환
+              char sign = ' ';
+            if (val < 0.0f) {
+                sign = '-';
+                val = -val;
+            }
+
+            // 2. 정수부와 소수부(소수점 둘째 자리까지) 분리
+            int t_int = (int)val;
+            int t_frac = (int)((val - t_int) * 100.0f);
 
             // 시나리오 로그 적용
             LOG_DBG("Temp Sensor DMA Buffer Read Success");
 
-            if (t > 40.0f)
+            if (t_int > 40)
             {
-                LOG_WRN("High Temperature Alert: %.2f *C", t);
+                LOG_WRN("High Temperature Alert:  %c%d.%02d *C", sign, t_int, t_frac);
             }
 
             // 모니터 시스템에 현재 온도값을 갱신 (전략 1)
@@ -190,7 +201,8 @@ void tempStartTask(void *argument)
             // 사람을 위한 텍스트 모드일 때만 출력
             if (!isMonitoringOn())
             {
-                cliPrintf("Current Temp: %.2f *C\r\n", t);
+                // 3. %f 대신 %d와 %02d를 조합하여 출력!
+                cliPrintf("Current Temp: %c%d.%02d *C\\r\\n", sign, t_int, t_frac);
             }
 
             osDelay(temp_read_period);

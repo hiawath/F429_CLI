@@ -217,9 +217,21 @@ void monitorSendPacket(void) {
             } else if (type == TYPE_INT32) {
                 len += snprintf(tx_buf + len, sizeof(tx_buf) - len, "%ld", (long)g_packet.nodes[i].value.i_val);
             } else if (type == TYPE_FLOAT) {
-                // 참고: printf에서 %f가 제대로 동작하려면 Makefile/CMake에 -u _printf_float 옵션이 있어야 함
-                // 만약 없다면 정수부/소수부로 쪼개서 출력해야 할 수도 있습니다. 
-                len += snprintf(tx_buf + len, sizeof(tx_buf) - len, "%.2f", g_packet.nodes[i].value.f_val);
+                // 참고: 부동소수점(%f) 스택 오버플로우 방지를 위해 정수/소수 분리 기법 사용
+                float val = g_packet.nodes[i].value.f_val;
+                char sign = '\0';
+                if (val < 0.0f) {
+                    sign = '-';
+                    val = -val;
+                }
+                int f_int = (int)val;
+                int f_frac = (int)((val - f_int) * 100.0f);
+                
+                if (sign == '-') {
+                    len += snprintf(tx_buf + len, sizeof(tx_buf) - len, "-%d.%02d", f_int, f_frac);
+                } else {
+                    len += snprintf(tx_buf + len, sizeof(tx_buf) - len, "%d.%02d", f_int, f_frac);
+                }
             } else {
                 len += snprintf(tx_buf + len, sizeof(tx_buf) - len, "%lu", (unsigned long)g_packet.nodes[i].value.u_val);
             }
